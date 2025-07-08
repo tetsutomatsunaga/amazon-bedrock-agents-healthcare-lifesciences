@@ -1,0 +1,59 @@
+[
+  {
+    "project_id": "PROJ_2023_001",
+    "title": "Anti-TNF Nanobody Optimization for Adalimumab Biosimilar",
+    "target": "TNF-α binding",
+    "objective": "Improve binding affinity and reduce immunogenicity",
+    "timeline_weeks": 10,
+    "cycles_completed": 4,
+    "final_kd_nm": 0.3,
+    "success_factors": [
+      "CDR3 loop engineering was most effective",
+      "Expected Improvement acquisition function optimal for initial cycles",
+      "Framework mutations improved stability without affecting binding"
+    ],
+    "methodology": {
+      "acquisition_strategy": "EI for exploration, UCB for exploitation",
+      "variants_per_cycle": 8,
+      "convergence_criteria": "KD < 0.5 nM or model uncertainty < 0.1"
+    }
+  },
+  {
+    "project_id": "PROJ_2023_015", 
+    "title": "vWF A1 Domain Nanobody Development",
+    "target": "von Willebrand Factor A1 domain",
+    "objective": "Develop high-affinity nanobody for thrombotic disorders",
+    "timeline_weeks": 8,
+    "cycles_completed": 3,
+    "final_kd_nm": 0.8,
+    "success_factors": [
+      "Targeted CDR1 and CDR3 mutations most effective",
+      "SPR assays with HBS-EP+ buffer provided consistent results",
+      "Expression yield monitoring prevented stability issues"
+    ],
+    "methodology": {
+      "acquisition_strategy": "Balanced EI/UCB approach",
+      "variants_per_cycle": 6,
+      "convergence_criteria": "Target KD achieved or 3 consecutive cycles without improvement"
+    }
+  },
+  {
+    "project_id": "PROJ_2022_087",
+    "title": "Caplacizumab Affinity Enhancement Project", 
+    "target": "vWF A1 domain binding optimization",
+    "objective": "Enhance Caplacizumab binding affinity for improved efficacy",
+    "timeline_weeks": 12,
+    "cycles_completed": 5,
+    "final_kd_nm": 0.4,
+    "success_factors": [
+      "Multi-point mutations in CDR3 achieved breakthrough",
+      "Active learning reduced experimental burden by 40%",
+      "Gaussian Process model accuracy improved with each cycle"
+    ],
+    "methodology": {
+      "acquisition_strategy": "Adaptive EI with increasing exploitation",
+      "variants_per_cycle": 10,
+      "convergence_criteria": "KD < 0.5 nM and model confidence > 0.9"
+    }
+  }
+]
