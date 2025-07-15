@@ -35,6 +35,29 @@ Resources:
         - Key: Purpose
           Value: ExperimentalData
 
+  # S3 Bucket for Knowledge Base
+  KnowledgeBaseBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-kb-${AWS::Region}-${AWS::AccountId}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Project
+          Value: DMTA-Orchestration
+        - Key: Purpose
+          Value: KnowledgeBase
+
+
+
   # DynamoDB Tables
   ProjectTable:
     Type: AWS::DynamoDB::Table
@@ -139,11 +162,23 @@ Resources:
                   - s3:GetObject
                   - s3:PutObject
                   - s3:DeleteObject
-                Resource: !Sub '${ExperimentalDataBucket.Arn}/*'
+                Resource: 
+                  - !Sub '${ExperimentalDataBucket.Arn}/*'
+                  - !Sub '${KnowledgeBaseBucket.Arn}/*'
               - Effect: Allow
                 Action:
                   - s3:ListBucket
-                Resource: !GetAtt ExperimentalDataBucket.Arn
+                Resource: 
+                  - !GetAtt ExperimentalDataBucket.Arn
+                  - !GetAtt KnowledgeBaseBucket.Arn
+        - PolicyName: LambdaInvokeAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:dmta-opentrons-simulator'
 
   # Lambda Functions
   PlanProjectFunction:
@@ -154,9 +189,12 @@ Resources:
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code: action-groups/plan-project
+      PackageType: Zip
       Environment:
         Variables:
           PROJECT_TABLE: !Ref ProjectTable
+          CYCLE_TABLE: !Ref CycleTable
+          VARIANT_TABLE: !Ref VariantTable
           S3_BUCKET: !Ref ExperimentalDataBucket
           LOG_LEVEL: INFO
       Timeout: 300
@@ -170,6 +208,7 @@ Resources:
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code: action-groups/design-variants
+      PackageType: Zip
       Environment:
         Variables:
           PROJECT_TABLE: !Ref ProjectTable
@@ -188,6 +227,7 @@ Resources:
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code: action-groups/make-test
+      PackageType: Zip
       Environment:
         Variables:
           PROJECT_TABLE: !Ref ProjectTable
@@ -206,6 +246,7 @@ Resources:
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code: action-groups/analyze-results
+      PackageType: Zip
       Environment:
         Variables:
           PROJECT_TABLE: !Ref ProjectTable
@@ -224,6 +265,7 @@ Resources:
       Handler: lambda_function.lambda_handler
       Role: !GetAtt LambdaExecutionRole.Arn
       Code: action-groups/project-status
+      PackageType: Zip
       Environment:
         Variables:
           PROJECT_TABLE: !Ref ProjectTable
@@ -232,6 +274,44 @@ Resources:
           LOG_LEVEL: INFO
       Timeout: 300
       MemorySize: 512
+
+  # Opentrons OT-2 Simulator Lambda
+  OpentronsLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: opentrons-layer
+      Description: Layer containing opentrons package
+      Content: lambda_layer/opentrons_layer.zip
+      CompatibleRuntimes:
+        - python3.12
+
+  OpentronsSimulatorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: dmta-opentrons-simulator
+      Runtime: python3.12
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code: action-groups/opentrons-simulator
+      PackageType: Zip
+      Environment:
+        Variables:
+          S3_BUCKET: !Ref ExperimentalDataBucket
+          KB_BUCKET: !Ref KnowledgeBaseBucket
+          LOG_LEVEL: INFO
+      Timeout: 600
+      MemorySize: 1024
+      Layers:
+        - !Ref OpentronsLayer
+      Tags:
+        - Key: Application
+          Value: HCLSAgents
+        - Key: Tool
+          Value: opentrons-simulator
+
+
+
+
 
   # Lambda Permissions for Bedrock Agent
   PlanProjectPermission:
@@ -273,6 +353,14 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: bedrock.amazonaws.com
       SourceArn: !Sub 'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/*'
+
+  OpentronsSimulatorPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref OpentronsSimulatorFunction
+      Action: lambda:InvokeFunction
+      Principal: lambda.amazonaws.com
+      SourceArn: !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-MakeTest'
 
   # Bedrock Agent
   DMTAAgent:
@@ -474,6 +562,20 @@ Outputs:
     Value: !Ref ExperimentalDataBucket
     Export:
       Name: !Sub '${AWS::StackName}-S3Bucket'
+  
+  KnowledgeBaseBucketName:
+    Description: 'S3 Bucket for Knowledge Base data'
+    Value: !Ref KnowledgeBaseBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-KBBucket'
+  
+  KnowledgeBaseInstructions:
+    Description: 'Instructions for creating Knowledge Base'
+    Value: !Sub |
+      1. Upload KB data: aws s3 cp knowledge-base/ s3://${KnowledgeBaseBucket}/projects/ --recursive
+      2. Run: ./setup-knowledge-base.sh (uses existing bucket: ${KnowledgeBaseBucket})
+      3. Create KB manually in AWS Console with S3 URI: s3://${KnowledgeBaseBucket}/projects/
+      4. Associate with Agent ID: ${DMTAAgent}
   
   ProjectTableName:
     Description: 'DynamoDB Project Table Name'

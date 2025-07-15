@@ -1,7 +1,9 @@
 import json
 import boto3
 import os
+from decimal import Decimal
 
+# Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
 
 def lambda_handler(event, context):
@@ -33,7 +35,7 @@ def lambda_handler(event, context):
                     'TEXT': {
                         'body': json.dumps({
                             'message': 'Project status retrieved',
-                            'status_data': result
+                            'status_data': convert_decimals_to_float(result)
                         })
                     }
                 }
@@ -43,83 +45,77 @@ def lambda_handler(event, context):
 
 def get_project_count():
     """Get total number of projects"""
-    project_table = dynamodb.Table(os.environ.get('PROJECT_TABLE'))
-    response = project_table.scan()
-    return {
-        'total_projects': len(response['Items']),
-        'projects': [{
-            'project_id': item['project_id'],
-            'target_kd_nm': float(item.get('target_kd_nm', 0)),
-            'created_at': item.get('created_at')
-        } for item in response['Items']]
-    }
+    try:
+        project_table = dynamodb.Table(os.environ['PROJECT_TABLE'])
+        response = project_table.scan(
+            Select='COUNT'
+        )
+        return {
+            'total_projects': response['Count']
+        }
+    except Exception as e:
+        return {'error': str(e)}
 
 def get_project_progress(project_id):
     """Get project progress"""
-    if not project_id:
-        project_table = dynamodb.Table(os.environ.get('PROJECT_TABLE'))
-        projects = project_table.scan()['Items']
-        if not projects:
-            return {'error': 'No projects found'}
-        project_id = min(projects, key=lambda x: x['created_at'])['project_id']
-    
-    # Get cycles and variants
-    cycle_table = dynamodb.Table(os.environ.get('CYCLE_TABLE'))
-    variant_table = dynamodb.Table(os.environ.get('VARIANT_TABLE'))
-    
-    cycles = cycle_table.query(
-        KeyConditionExpression='project_id = :pid',
-        ExpressionAttributeValues={':pid': project_id}
-    )['Items']
-    
-    variants = variant_table.query(
-        KeyConditionExpression='project_id = :pid',
-        ExpressionAttributeValues={':pid': project_id}
-    )['Items']
-    
-    current_phase = determine_current_phase(cycles, variants)
-    
-    return {
-        'project_id': project_id,
-        'cycles_completed': len(cycles),
-        'variants_generated': len(variants),
-        'current_phase': current_phase,
-        'cycles_summary': [{
-            'cycle_number': int(c['cycle_number']),
-            'best_kd_nm': float(c.get('best_kd_nm', 0)),
-            'target_achieved': c.get('target_achieved', False)
-        } for c in sorted(cycles, key=lambda x: int(x['cycle_number']))]
-    }
+    try:
+        # Get project table
+        project_table = dynamodb.Table(os.environ['PROJECT_TABLE'])
+        
+        if not project_id:
+            # Get first project ID
+            response = project_table.scan(
+                ProjectionExpression='project_id',
+                Limit=1
+            )
+            if response['Items']:
+                project_id = response['Items'][0]['project_id']
+            else:
+                project_id = 'demo-project'
+        
+        # Get cycles
+        cycle_table = dynamodb.Table(os.environ['CYCLE_TABLE'])
+        cycle_response = cycle_table.query(
+            KeyConditionExpression='project_id = :pid',
+            ExpressionAttributeValues={
+                ':pid': project_id
+            }
+        )
+        cycles = cycle_response.get('Items', [])
+        
+        # Get variants
+        variant_table = dynamodb.Table(os.environ['VARIANT_TABLE'])
+        variant_response = variant_table.query(
+            KeyConditionExpression='project_id = :pid',
+            ExpressionAttributeValues={
+                ':pid': project_id
+            }
+        )
+        variants = variant_response.get('Items', [])
+        
+        return {
+            'project_id': project_id,
+            'cycles_completed': len(cycles),
+            'variants_generated': len(variants),
+            'current_phase': determine_current_phase(cycles, variants),
+            'cycles_summary': cycles
+        }
+    except Exception as e:
+        return {'error': str(e)}
 
 def get_all_projects_status():
     """Get all projects status"""
-    project_table = dynamodb.Table(os.environ.get('PROJECT_TABLE'))
-    cycle_table = dynamodb.Table(os.environ.get('CYCLE_TABLE'))
-    variant_table = dynamodb.Table(os.environ.get('VARIANT_TABLE'))
-    
-    projects = project_table.scan()['Items']
-    all_cycles = cycle_table.scan()['Items']
-    all_variants = variant_table.scan()['Items']
-    
-    project_statuses = []
-    for project in projects:
-        project_id = project['project_id']
-        project_cycles = [c for c in all_cycles if c['project_id'] == project_id]
-        project_variants = [v for v in all_variants if v['project_id'] == project_id]
+    try:
+        project_table = dynamodb.Table(os.environ['PROJECT_TABLE'])
+        response = project_table.scan()
+        projects = response.get('Items', [])
         
-        project_statuses.append({
-            'project_id': project_id,
-            'target_kd_nm': float(project.get('target_kd_nm', 0)),
-            'cycles_completed': len(project_cycles),
-            'variants_generated': len(project_variants),
-            'current_phase': determine_current_phase(project_cycles, project_variants),
-            'created_at': project.get('created_at')
-        })
-    
-    return {
-        'total_projects': len(projects),
-        'projects': sorted(project_statuses, key=lambda x: x['created_at'])
-    }
+        return {
+            'total_projects': len(projects),
+            'projects': projects
+        }
+    except Exception as e:
+        return {'error': str(e)}
 
 def determine_current_phase(cycles, variants):
     """Determine current phase"""
@@ -138,3 +134,14 @@ def determine_current_phase(cycles, variants):
         return f"Cycle {next_cycle} Design completed - ready for Make-Test"
     else:
         return f"Cycle {latest_cycle} completed - ready for Cycle {next_cycle} Design"
+
+def convert_decimals_to_float(obj):
+    """Recursively convert Decimal objects to float for JSON serialization"""
+    if isinstance(obj, list):
+        return [convert_decimals_to_float(item) for item in obj]
+    elif isinstance(obj, dict):
+        return {key: convert_decimals_to_float(value) for key, value in obj.items()}
+    elif isinstance(obj, Decimal):
+        return float(obj)
+    else:
+        return obj

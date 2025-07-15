@@ -6,8 +6,8 @@ from datetime import datetime
 from decimal import Decimal
 
 # Initialize AWS clients
-dynamodb = boto3.resource('dynamodb')
 s3 = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
 
 def lambda_handler(event, context):
     """Handle plan_project function"""
@@ -48,9 +48,10 @@ def lambda_handler(event, context):
     try:
         table = dynamodb.Table(os.environ['PROJECT_TABLE'])
         table.put_item(Item=project_plan)
-        print(f"Project {project_id} stored in DynamoDB")
+        print(f"Project stored in DynamoDB: {project_id}")
     except Exception as e:
-        print(f"Error storing project: {str(e)}")
+        print(f"Error storing project in DynamoDB: {str(e)}")
+        raise e
     
     # Convert all Decimal values to float for JSON serialization
     project_plan_json = convert_decimals_to_float(project_plan)
@@ -70,6 +71,7 @@ def lambda_handler(event, context):
         print(f"Project plan document saved to S3: {s3_key}")
     except Exception as e:
         print(f"Error saving project document: {str(e)}")
+        raise e
     
     response_body = {
         'message': f'DMTA project planned successfully for {target_nanobody} optimization',

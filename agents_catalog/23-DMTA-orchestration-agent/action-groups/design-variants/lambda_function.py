@@ -40,37 +40,36 @@ def lambda_handler(event, context):
     
     # Store variants in DynamoDB
     try:
-        # Get the latest project_id from ProjectTable
-        project_table_name = os.environ.get('PROJECT_TABLE', 'DMTAProjectTable')
-        variant_table_name = os.environ.get('VARIANT_TABLE', 'DMTAVariantTable')
-        print(f"Using PROJECT_TABLE: {project_table_name}")
-        print(f"Using VARIANT_TABLE: {variant_table_name}")
+        project_table = dynamodb.Table(os.environ['PROJECT_TABLE'])
+        variant_table = dynamodb.Table(os.environ['VARIANT_TABLE'])
         
-        project_table = dynamodb.Table(project_table_name)
-        project_response = project_table.scan()
-        print(f"Found {len(project_response['Items'])} projects")
+        # Get the latest project by scanning the project table
+        response = project_table.scan(
+            ProjectionExpression='project_id',
+            Limit=1
+        )
+        project_id = response['Items'][0]['project_id'] if response['Items'] else 'default-project'
         
-        if project_response['Items']:
-            # Get the most recent project
-            latest_project = max(project_response['Items'], key=lambda x: x['created_at'])
-            project_id = latest_project['project_id']
-            print(f"Using project_id: {project_id}")
-        else:
-            project_id = 'default-project'
-            print(f"No projects found, using default: {project_id}")
-        
-        table = dynamodb.Table(variant_table_name)
+        # Store variants in DynamoDB
         for i, variant in enumerate(variants):
-            variant['project_id'] = project_id
-            variant['created_at'] = datetime.now().isoformat()
-            variant['cycle_number'] = cycle_number
-            table.put_item(Item=variant)
-            print(f"Stored variant {i+1}: {variant['variant_id']}")
+            variant_data = {
+                'project_id': project_id,
+                'variant_id': variant['variant_id'],
+                'sequence': variant['sequence'],
+                'mutations': variant['mutations'],
+                'predicted_affinity': variant['predicted_affinity'],
+                'acquisition_score': variant['acquisition_score'],
+                'acquisition_function': variant['acquisition_function'],
+                'created_at': datetime.now().isoformat(),
+                'cycle_number': cycle_number
+            }
+            
+            variant_table.put_item(Item=variant_data)
+            print(f"Stored variant {i+1} in DynamoDB: {variant['variant_id']}")
         print(f"Successfully stored {len(variants)} variants in DynamoDB")
     except Exception as e:
-        print(f"Error storing variants: {str(e)}")
-        import traceback
-        print(f"Traceback: {traceback.format_exc()}")
+        print(f"Error storing variants in DynamoDB: {str(e)}")
+        raise e
     
     # Convert Decimal to float for JSON serialization
     variants_json = []

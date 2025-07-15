@@ -7,8 +7,8 @@ from datetime import datetime
 from decimal import Decimal
 
 # Initialize AWS clients
-dynamodb = boto3.resource('dynamodb')
 s3 = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
 
 def lambda_handler(event, context):
     """Handle analyze_results function - Analyze SPR binding results using Gaussian Process modeling"""
@@ -59,7 +59,7 @@ def lambda_handler(event, context):
     
     response_body = {
         'message': f'Analysis completed for cycle {cycle_number}',
-        'analysis_results': analysis,
+        'analysis_results': convert_decimals_to_float(analysis),
         'next_steps': next_steps
     }
     
@@ -80,17 +80,18 @@ def lambda_handler(event, context):
 def analyze_cycle_results(current_data, cycle_number, target_kd):
     """Analyze current cycle experimental results"""
     # Extract binding data from experimental results
-    results = current_data.get('experimental_results', [])
-    if not results:
-        # Generate mock data for demo
-        results = [{'spr_binding_data': {'binding_kd_nm': 2.5 - i*0.3}} for i in range(8)]
-    
+    # Extract KD values from the binding data
     kd_values = []
-    for result in results:
-        if 'spr_binding_data' in result:
-            kd_values.append(result['spr_binding_data']['binding_kd_nm'])
-        elif 'binding_kd_nm' in result:
-            kd_values.append(result['binding_kd_nm'])
+    expression_values = []
+    
+    for variant_id, data in current_data.items():
+        if isinstance(data, dict) and 'kd_nm' in data:
+            kd_values.append(float(data['kd_nm']))
+            if 'expression_mg_l' in data:
+                expression_values.append(float(data['expression_mg_l']))
+        elif isinstance(data, (int, float, str)):
+            # Handle simple format where value is directly KD
+            kd_values.append(float(data))
     
     if not kd_values:
         kd_values = [2.5 - i*0.3 for i in range(8)]  # Fallback
@@ -101,19 +102,19 @@ def analyze_cycle_results(current_data, cycle_number, target_kd):
     
     analysis = {
         'cycle_number': cycle_number,
-        'variants_tested': len(results),
+        'variants_tested': len(kd_values),
         'binding_results': {
-            'best_kd_nm': round(best_kd, 2),
-            'median_kd_nm': round(statistics.median(kd_values), 2),
+            'best_kd_nm': Decimal(str(round(best_kd, 2))),
+            'median_kd_nm': Decimal(str(round(statistics.median(kd_values), 2))),
             'kd_distribution': {
-                'mean': round(statistics.mean(kd_values), 2),
-                'std': round(statistics.stdev(kd_values) if len(kd_values) > 1 else 0, 2),
-                'range': [round(min(kd_values), 2), round(max(kd_values), 2)]
+                'mean': Decimal(str(round(statistics.mean(kd_values), 2))),
+                'std': Decimal(str(round(statistics.stdev(kd_values) if len(kd_values) > 1 else 0, 2))),
+                'range': [Decimal(str(round(min(kd_values), 2))), Decimal(str(round(max(kd_values), 2)))]
             }
         },
         'improvement_metrics': {
-            'improvement_factor': round(improvement_factor, 2),
-            'target_progress_percent': round(target_progress, 1),
+            'improvement_factor': Decimal(str(round(improvement_factor, 2))),
+            'target_progress_percent': Decimal(str(round(target_progress, 1))),
             'variants_better_than_target': len([kd for kd in kd_values if kd <= target_kd])
         },
         'statistical_analysis': {
@@ -127,8 +128,10 @@ def analyze_cycle_results(current_data, cycle_number, target_kd):
 
 def update_gaussian_process_model(current_data, historical_data, cycle_number):
     """Update Gaussian Process model with new experimental data"""
-    # Simulate GP model update
-    total_data_points = len(current_data.get('experimental_results', [])) + len(historical_data.get('results', []))
+    # Count data points from current and historical data
+    current_points = len([v for v in current_data.values() if isinstance(v, dict) and 'kd_nm' in v])
+    historical_points = len(historical_data.get('results', [])) if isinstance(historical_data.get('results'), list) else 0
+    total_data_points = current_points + historical_points
     
     # Model performance improves with more data
     base_accuracy = 0.75
@@ -144,24 +147,24 @@ def update_gaussian_process_model(current_data, historical_data, cycle_number):
         'model_version': f'GP_v{cycle_number}',
         'training_data': {
             'total_points': total_data_points,
-            'current_cycle_points': len(current_data.get('experimental_results', [])),
+            'current_cycle_points': current_points,
             'historical_points': len(historical_data.get('results', []))
         },
         'model_performance': {
-            'accuracy_r2': round(model_accuracy, 3),
-            'rmse_log_kd': round(0.3 - (cycle_number * 0.02), 3),
-            'uncertainty_estimate': round(uncertainty_estimate, 3)
+            'accuracy_r2': Decimal(str(round(model_accuracy, 3))),
+            'rmse_log_kd': Decimal(str(round(0.3 - (cycle_number * 0.02), 3))),
+            'uncertainty_estimate': Decimal(str(round(uncertainty_estimate, 3)))
         },
         'hyperparameters': {
-            'length_scale': round(1.2 + random.gauss(0, 0.1), 2),
-            'signal_variance': round(0.8 + random.gauss(0, 0.05), 2),
-            'noise_variance': round(max(0.05, 0.15 - cycle_number * 0.01), 3)
+            'length_scale': Decimal(str(round(1.2 + random.gauss(0, 0.1), 2))),
+            'signal_variance': Decimal(str(round(0.8 + random.gauss(0, 0.05), 2))),
+            'noise_variance': Decimal(str(round(max(0.05, 0.15 - cycle_number * 0.01), 3)))
         },
         'feature_importance': {
-            'cdr1_mutations': 0.35,
-            'cdr2_mutations': 0.15,
-            'cdr3_mutations': 0.40,
-            'framework_mutations': 0.10
+            'cdr1_mutations': Decimal('0.35'),
+            'cdr2_mutations': Decimal('0.15'),
+            'cdr3_mutations': Decimal('0.40'),
+            'framework_mutations': Decimal('0.10')
         }
     }
     
@@ -169,25 +172,25 @@ def update_gaussian_process_model(current_data, historical_data, cycle_number):
 
 def assess_optimization_progress(cycle_analysis, gp_model, target_kd):
     """Assess overall optimization progress and convergence"""
-    best_kd = cycle_analysis['binding_results']['best_kd_nm']
+    best_kd = float(cycle_analysis['binding_results']['best_kd_nm'])
     
     progress = {
         'target_achievement': {
-            'target_kd_nm': target_kd,
-            'best_achieved_kd_nm': best_kd,
+            'target_kd_nm': Decimal(str(target_kd)),
+            'best_achieved_kd_nm': Decimal(str(best_kd)),
             'target_met': best_kd <= target_kd,
-            'progress_to_target_percent': min(100, (target_kd / best_kd) * 100) if best_kd > 0 else 0
+            'progress_to_target_percent': Decimal(str(min(100, (target_kd / best_kd) * 100) if best_kd > 0 else 0))
         },
         'convergence_assessment': {
-            'model_confidence': gp_model['model_performance']['accuracy_r2'],
-            'prediction_uncertainty': gp_model['model_performance']['uncertainty_estimate'],
-            'likely_converged': gp_model['model_performance']['uncertainty_estimate'] < 0.15,
-            'improvement_plateau': cycle_analysis['improvement_metrics']['improvement_factor'] < 1.2
+            'model_confidence': Decimal(str(gp_model['model_performance']['accuracy_r2'])),
+            'prediction_uncertainty': Decimal(str(gp_model['model_performance']['uncertainty_estimate'])),
+            'likely_converged': float(gp_model['model_performance']['uncertainty_estimate']) < 0.15,
+            'improvement_plateau': float(cycle_analysis['improvement_metrics']['improvement_factor']) < 1.2
         },
         'optimization_efficiency': {
             'cycles_completed': cycle_analysis['cycle_number'],
             'variants_per_cycle': cycle_analysis['variants_tested'],
-            'success_rate': cycle_analysis['improvement_metrics']['variants_better_than_target'] / cycle_analysis['variants_tested']
+            'success_rate': Decimal(str(cycle_analysis['improvement_metrics']['variants_better_than_target'] / cycle_analysis['variants_tested']))
         }
     }
     
@@ -197,7 +200,7 @@ def generate_next_cycle_recommendations(gp_model, progress, convergence_params):
     """Generate recommendations for next DMTA cycle"""
     target_met = progress['target_achievement']['target_met']
     converged = progress['convergence_assessment']['likely_converged']
-    uncertainty = gp_model['model_performance']['uncertainty_estimate']
+    uncertainty = float(gp_model['model_performance']['uncertainty_estimate'])
     
     # Decision logic for continuing optimization
     continue_optimization = not target_met and not converged and progress['optimization_efficiency']['cycles_completed'] < 6
@@ -207,14 +210,14 @@ def generate_next_cycle_recommendations(gp_model, progress, convergence_params):
         if uncertainty > 0.25:
             next_strategy = 'Exploration-focused (UCB with high beta)'
             acquisition_function = 'UCB'
-        elif progress['target_achievement']['progress_to_target_percent'] > 80:
+        elif float(progress['target_achievement']['progress_to_target_percent']) > 80:
             next_strategy = 'Exploitation-focused (EI with low xi)'
             acquisition_function = 'Expected Improvement'
         else:
             next_strategy = 'Balanced exploration-exploitation (EI)'
             acquisition_function = 'Expected Improvement'
         
-        focus_regions = ['CDR1', 'CDR3'] if gp_model['feature_importance']['cdr3_mutations'] > 0.3 else ['CDR1', 'CDR2', 'CDR3']
+        focus_regions = ['CDR1', 'CDR3'] if float(gp_model['feature_importance']['cdr3_mutations']) > 0.3 else ['CDR1', 'CDR2', 'CDR3']
         next_cycle_variants = 8 if uncertainty > 0.2 else 6
     else:
         next_strategy = 'Optimization complete'
@@ -230,7 +233,7 @@ def generate_next_cycle_recommendations(gp_model, progress, convergence_params):
         'recommended_variants': next_cycle_variants,
         'focus_regions': focus_regions,
         'estimated_cycles_remaining': max(0, 3 - progress['optimization_efficiency']['cycles_completed']) if continue_optimization else 0,
-        'confidence_in_recommendation': 0.9 if gp_model['model_performance']['accuracy_r2'] > 0.8 else 0.7
+        'confidence_in_recommendation': Decimal('0.9') if float(gp_model['model_performance']['accuracy_r2']) > 0.8 else Decimal('0.7')
     }
     
     return recommendations
@@ -240,27 +243,27 @@ def store_analysis_results(cycle_analysis, gp_model, cycle_number):
     analysis_id = f'ANALYSIS_{cycle_number}_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
     
     try:
+        # Get the latest project by scanning the project table
+        project_table = dynamodb.Table(os.environ['PROJECT_TABLE'])
+        response = project_table.scan(
+            ProjectionExpression='project_id',
+            Limit=1
+        )
+        project_id = response['Items'][0]['project_id'] if response['Items'] else 'default-project'
+        
         # Store in DynamoDB CycleTable
-        # Get the latest project_id from ProjectTable
-        project_table = dynamodb.Table(os.environ.get('PROJECT_TABLE', 'DMTAProjectTable'))
-        project_response = project_table.scan()
-        if project_response['Items']:
-            latest_project = max(project_response['Items'], key=lambda x: x['created_at'])
-            project_id = latest_project['project_id']
-        else:
-            project_id = 'default-project'
-            
-        cycle_table = dynamodb.Table(os.environ.get('CYCLE_TABLE', 'DMTACycleTable'))
+        cycle_table = dynamodb.Table(os.environ['CYCLE_TABLE'])
         analysis_record = {
             'project_id': project_id,
             'cycle_number': cycle_number,
             'analysis_id': analysis_id,
             'timestamp': datetime.now().isoformat(),
-            'best_kd_nm': Decimal(str(cycle_analysis['binding_results']['best_kd_nm'])),
-            'model_accuracy': Decimal(str(gp_model['model_performance']['accuracy_r2'])),
+            'best_kd_nm': cycle_analysis['binding_results']['best_kd_nm'],
+            'model_accuracy': gp_model['model_performance']['accuracy_r2'],
             'variants_tested': cycle_analysis['variants_tested'],
             'target_achieved': cycle_analysis['improvement_metrics']['variants_better_than_target'] > 0
         }
+        
         cycle_table.put_item(Item=analysis_record)
         print(f"Cycle data stored in DynamoDB: {project_id}, cycle {cycle_number}")
         
@@ -271,18 +274,17 @@ def store_analysis_results(cycle_analysis, gp_model, cycle_number):
             'gp_model': gp_model,
             'timestamp': datetime.now().isoformat()
         }
-        # Convert Decimal values for JSON serialization
-        detailed_results_json = convert_decimals_to_float(detailed_results)
         s3.put_object(
-            Bucket=os.environ.get('S3_BUCKET', 'dmta-data'),
+            Bucket=os.environ['S3_BUCKET'],
             Key=s3_key,
-            Body=json.dumps(detailed_results_json, indent=2)
+            Body=json.dumps(detailed_results, indent=2, default=str)
         )
         
         print(f"Analysis results stored: {analysis_id}")
         
     except Exception as e:
         print(f"Error storing analysis: {str(e)}")
+        raise e
     
     return analysis_id
 
@@ -291,7 +293,7 @@ def calculate_confidence_interval(values, confidence=0.95):
     mean = statistics.mean(values)
     std_err = statistics.stdev(values) / (len(values) ** 0.5) if len(values) > 1 else 0
     margin = 1.96 * std_err  # 95% CI
-    return [round(mean - margin, 2), round(mean + margin, 2)]
+    return [Decimal(str(round(mean - margin, 2))), Decimal(str(round(mean + margin, 2)))]
 
 def identify_outliers(values):
     """Identify outliers using IQR method"""
@@ -302,7 +304,7 @@ def identify_outliers(values):
     iqr = q3 - q1
     lower_bound = q1 - 1.5 * iqr
     upper_bound = q3 + 1.5 * iqr
-    outliers = [v for v in values if v < lower_bound or v > upper_bound]
+    outliers = [Decimal(str(v)) for v in values if v < lower_bound or v > upper_bound]
     return outliers
 
 def convert_decimals_to_float(obj):
